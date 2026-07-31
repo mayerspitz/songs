@@ -3,9 +3,12 @@ import { api } from '../api.js';
 import { store } from '../store.js';
 import { engine } from '../audio.js';
 import { h, clear, toast, busy, confirmDlg, avatar, menu, fmtScore, fmtBeat, icon } from '../ui.js';
+import { sendToSongDialog } from './dialogs.js';
 
 export function panelTabs() {
+  const poolN = store.poolTakes().length;
   const tabs = [
+    ['pool', 'archive', poolN ? `Pool (${poolN})` : 'Pool', 'Imported voice notes — drag them into the timeline as takes'],
     ['comps', 'layers', compLabel(), 'Compiled versions & voting'],
     ['comments', 'comment', 'Comments', 'Comments & pins'],
     ['members', 'users', 'Members', 'Members & roles'],
@@ -25,7 +28,117 @@ export function renderPanel(el, ctx) {
   const p = store.ui.panel;
   if (p === 'comments') return renderComments(el);
   if (p === 'members') return renderMembers(el);
+  if (p === 'pool') return renderPool(el, ctx);
   return renderComps(el, ctx);
+}
+
+// ---------- Pool (imported voice notes) ----------
+
+async function importFiles(files) {
+  const list = [...files].filter(f => f.size > 100);
+  if (!list.length) return toast('No usable files', 'error');
+  const b = busy(`Importing 1/${list.length}…`);
+  let imported = 0, failed = 0;
+  try {
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i];
+      b.set(`Importing ${i + 1}/${list.length} — ${f.name}`);
+      try {
+        const r = await api.upload(`/api/songs/${store.songId}/import`, f, {
+          type: f.type || 'application/octet-stream',
+          query: { name: f.name, type: f.type || '' },
+        });
+        imported += r.imported;
+        failed += (r.failed || []).length;
+      } catch (e) {
+        failed++;
+        toast(`${f.name}: ${e.message}`, 'error');
+      }
+    }
+    await store.refreshSong(true);
+    store.ui.panel = 'pool';
+    store.emit();
+    if (imported) toast(`Imported ${imported} voice note${imported > 1 ? 's' : ''} into the Pool${failed ? ` (${failed} skipped)` : ''}`);
+  } finally { b.close(); }
+}
+
+function renderPool(el, ctx) {
+  const items = store.poolTakes();
+  const canAdd = store.can('addTake');
+  const fileInput = h('input', {
+    type: 'file', multiple: true, style: { display: 'none' },
+    accept: '.zip,.ogg,.opus,.oga,.mp3,.m4a,.aac,.wav,.flac,.webm,.amr,.3gp,audio/*,application/zip',
+    onchange: e => { if (e.target.files.length) importFiles(e.target.files); e.target.value = ''; },
+  });
+  const dropzone = h('div.dropzone', {
+    ondragover: e => { e.preventDefault(); dropzone.classList.add('over'); },
+    ondragleave: () => dropzone.classList.remove('over'),
+    ondrop: e => {
+      e.preventDefault();
+      dropzone.classList.remove('over');
+      if (e.dataTransfer.files && e.dataTransfer.files.length) importFiles(e.dataTransfer.files);
+    },
+    onclick: () => fileInput.click(),
+  },
+    icon('upload', { size: 22 }),
+    h('div.small', {}, 'Drop voice notes here — single files or a whole .zip'),
+    h('div.tiny.dim', {}, 'or click to browse (multiple allowed)'),
+    fileInput);
+
+  const itemRow = t => {
+    const author = store.usersById()[t.authorId];
+    return h('div.pool-item', {
+      draggable: true,
+      title: 'Drag onto the timeline to place it as a take (a copy — the Pool keeps the original)',
+      ondragstart: e => {
+        e.dataTransfer.setData('text/humlab-pool', t.id);
+        e.dataTransfer.effectAllowed = 'copy';
+      },
+    },
+      h('span.pool-grip', {}, icon('drag', { size: 14 })),
+      h('button.icon-btn', {
+        title: 'Play', onclick: () => engine.audition(t.fileId, { gain: t.gain }),
+      }, icon('play', { size: 14 })),
+      h('div.min0.grow', {},
+        h('div.small.ellip', {}, t.name),
+        h('div.tiny.dim', {}, `${(t.duration || 0).toFixed(1)}s` + (author ? ` · ${author.name}` : ''))),
+      h('button.icon-btn', {
+        title: 'Place at the needle (into the current stage)',
+        onclick: () => ctx.placePool && ctx.placePool(t.id, {}),
+      }, icon('place', { size: 15 })),
+      h('button.icon-btn', {
+        title: 'More',
+        onclick: e => menu(e.currentTarget, [
+          { label: 'Place copy at needle', icon: icon('place'), action: () => ctx.placePool && ctx.placePool(t.id, {}) },
+          { label: 'Move to needle (leave the Pool)', icon: icon('swap'), action: () => ctx.placePool && ctx.placePool(t.id, { mode: 'move' }) },
+          { label: 'Send to another song’s Pool…', icon: icon('archive'), action: () => sendToSongDialog(t) },
+          '-',
+          { label: 'Download WAV', icon: icon('download'), action: () => window.open(`/api/files/${t.fileId}/wav`, '_blank') },
+          { label: 'Rename', icon: icon('edit'), action: async () => {
+              const name = prompt('Rename voice note:', t.name);
+              if (name) { await api.patch(`/api/takes/${t.id}`, { name }); store.refreshSong(true); }
+            } },
+          '-',
+          { label: 'Remove from Pool', icon: icon('trash'), danger: true, action: async () => {
+              await api.del(`/api/takes/${t.id}`);
+              if (ctx.pushAction) ctx.pushAction({
+                label: `remove "${t.name}" from pool`,
+                undo: () => api.post(`/api/takes/${t.id}/restore`, {}),
+                redo: () => api.del(`/api/takes/${t.id}`),
+              });
+              store.refreshSong(true);
+            } },
+        ]),
+      }, icon('more', { size: 14 })));
+  };
+
+  clear(el,
+    h('div.panel-section', {},
+      h('p.small.dim', {}, 'The Pool holds imported voice notes (e.g. WhatsApp .ogg exports). Audition them, then drag one onto the timeline — or use the place button to drop it at the needle. Placing makes a copy; the Pool keeps the original for reuse.'),
+      canAdd ? dropzone : h('p.small.dim', {}, 'Suggesters and up can import.'),
+      items.length
+        ? items.map(itemRow)
+        : h('div.dim.small.pad-s', {}, 'Nothing here yet — import your voice notes.')));
 }
 
 // ---------- comps + votes ----------

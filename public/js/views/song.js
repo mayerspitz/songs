@@ -66,6 +66,26 @@ export async function renderSongView(root, songId) {
   if (ui.savedView) { tl.pxPerBeat = ui.savedView.pxPerBeat || 16; tl.scrollBeat = ui.savedView.scrollBeat || 0; }
   tl.cb.onViewChange = v => localStorage.setItem('humlab-zoom-' + songId, JSON.stringify(v));
 
+  // drop a Pool voice note onto the timeline -> place a copy as a take
+  canvas.addEventListener('dragover', e => {
+    if ([...e.dataTransfer.types].includes('text/humlab-pool')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      canvas.classList.add('drop-target');
+    }
+  });
+  canvas.addEventListener('dragleave', () => canvas.classList.remove('drop-target'));
+  canvas.addEventListener('drop', e => {
+    canvas.classList.remove('drop-target');
+    const id = e.dataTransfer.getData('text/humlab-pool');
+    if (!id) return;
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const hitR = tl.hit(x, y);
+    placePool(id, { beat: tl.beatAt(x), rowIndex: hitR.rowIndex });
+  });
+
   keyHandler = e => onKey(e);
   document.addEventListener('keydown', keyHandler);
 
@@ -547,6 +567,63 @@ async function swapSelection() {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+// ---------- Pool placement ----------
+
+// Place a Pool voice note onto the timeline at a beat (default: the needle).
+// mode 'copy' keeps the original in the Pool; 'move' takes it out of the Pool.
+async function placePool(takeId, { beat = null, rowIndex = null, mode = 'copy' } = {}) {
+  const src = store.take(takeId);
+  if (!src) return toast('Voice note not found', 'error');
+  if (!store.can('addTake')) return toast('Your role cannot place takes', 'error');
+  const ui = store.ui;
+  const stage = ui.stageView;
+  const at = Math.max(0, Math.round(((beat != null ? beat : ui.playhead) || 0) * 4) / 4);
+  let laneType, laneId, offsetBeats;
+  if (stage === 1) {
+    const sec = store.song.sections.find(s => at >= s.start_beat - 1e-6 && at < s.start_beat + s.length_beats + 1e-6)
+      || store.section(ui.selectedSectionId) || store.song.sections[0];
+    if (!sec) return toast('Create a part first', 'error');
+    laneType = 'section'; laneId = sec.id; offsetBeats = Math.max(0, at - sec.start_beat);
+    ui.selectedSectionId = sec.id;
+  } else if (stage === 2) {
+    laneType = 'perf'; laneId = 'perf'; offsetBeats = at;
+  } else {
+    const m = buildModel();
+    const laneFromRow = rowIndex != null && m.rows[rowIndex] ? m.rows[rowIndex].laneId : null;
+    const tr = store.song.tracks.find(t => t.id === (laneFromRow || ui.selectedTrackId)) || store.song.tracks[0];
+    if (!tr) return toast('Add a track first', 'error');
+    laneType = 'track'; laneId = tr.id; offsetBeats = at;
+    ui.selectedTrackId = tr.id;
+  }
+  try {
+    let placedId;
+    if (mode === 'move') {
+      const before = { stage: src.stage, laneType: src.laneType, laneId: src.laneId, offsetBeats: src.offsetBeats };
+      await api.patch(`/api/takes/${src.id}`, { stage, laneType, laneId, offsetBeats });
+      pushAction({
+        label: `move "${src.name}" out of the Pool`,
+        undo: () => api.patch(`/api/takes/${src.id}`, before),
+        redo: () => api.patch(`/api/takes/${src.id}`, { stage, laneType, laneId, offsetBeats }),
+      });
+      placedId = src.id;
+    } else {
+      const r = await api.post(`/api/takes/${src.id}/duplicate`, {
+        stage, laneType, laneId, offsetBeats, name: src.name,
+      });
+      pushAction({
+        label: `place "${src.name}"`,
+        undo: () => api.del(`/api/takes/${r.id}`),
+        redo: () => restoreTake(r.id),
+      });
+      placedId = r.id;
+    }
+    ui.selectedTakeId = placedId;
+    ui.multiSel = new Set();
+    await store.refreshSong(true);
+    toast(mode === 'move' ? `Moved "${src.name}" onto the timeline` : `Placed "${src.name}" — the Pool keeps the original`);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 // ---------- keyboard ----------
 
 function onKey(e) {
@@ -842,6 +919,7 @@ function takeMenu(t, anchorEl) {
       action: () => dialogs.copyToSectionDialog(t),
     } : null,
     '-',
+    { label: 'Send to another song’s Pool…', icon: icon('archive'), action: () => dialogs.sendToSongDialog(t) },
     { label: 'Download WAV', icon: icon('download'), action: () => { window.open(`/api/files/${t.fileId}/wav`, '_blank'); } },
     t.historyLen > 0 && canEdit ? {
       label: `Undo last audio edit (${t.historyLen})`, icon: icon('undo'),
@@ -864,7 +942,7 @@ function render(skel) {
   tl.setPlayhead(store.ui.playhead || 0);
   renderInspector(skel.querySelector('.inspector'));
   clear(skel.querySelector('.panel-tabs'), panelTabs());
-  renderPanel(skel.querySelector('.panel-body'), { auditionTake, playFrom, structureSpans, currentStructure, s2SourceCompId });
+  renderPanel(skel.querySelector('.panel-body'), { auditionTake, playFrom, structureSpans, currentStructure, s2SourceCompId, placePool, pushAction });
 }
 
 function renderHeader(el) {

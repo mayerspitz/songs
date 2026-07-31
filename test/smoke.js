@@ -31,6 +31,35 @@ function wavFromNotes(notes, { sr = 48000, bpm = 120 } = {}) {
   return buf;
 }
 
+
+function buildZip(entries) {
+  // store-method (no compression) ZIP for testing the import endpoint
+  const { crc32 } = require('zlib');
+  const parts = [], central = [];
+  let offset = 0;
+  for (const { name, data } of entries) {
+    const nameBuf = Buffer.from(name);
+    const crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(0, 8); local.writeUInt32LE(0, 10); local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26); local.writeUInt16LE(0, 28);
+    parts.push(local, nameBuf, data);
+    const cen = Buffer.alloc(46);
+    cen.writeUInt32LE(0x02014b50, 0); cen.writeUInt16LE(20, 4); cen.writeUInt16LE(20, 6);
+    cen.writeUInt32LE(crc, 16); cen.writeUInt32LE(data.length, 20); cen.writeUInt32LE(data.length, 24);
+    cen.writeUInt16LE(nameBuf.length, 28); cen.writeUInt32LE(offset, 42);
+    central.push(Buffer.concat([cen, nameBuf]));
+    offset += 30 + nameBuf.length + data.length;
+  }
+  const cd = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(entries.length, 8); eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(cd.length, 12); eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, cd, eocd]);
+}
+
 function client() {
   let cookie = '';
   return {
@@ -229,6 +258,46 @@ function check(name, cond, extra) {
   check('mix comp', r.status === 200, r.data);
   r = await owner.call('GET', `/api/comps/${r.data.id}/render`, { query: { format: 'wav' } });
   check('mix render wav', r.status === 200 && r.data.slice(0, 4).toString() === 'RIFF', r.status);
+
+
+  console.log('· pool: zip import, place, move, send-to-song');
+  const note1 = wavFromNotes([{ beat: 0, beats: 2, midi: 60 }, { beat: 2, beats: 2, midi: 64 }], { bpm: 120 });
+  const note2 = wavFromNotes([{ beat: 0, beats: 1, midi: 67 }], { bpm: 120 });
+  const zip = buildZip([
+    { name: 'voice/PTT-001.wav', data: note1 },
+    { name: 'voice/PTT-002.wav', data: note2 },
+    { name: 'voice/notes.txt', data: Buffer.from('not audio') },
+  ]);
+  r = await owner.call('POST', `/api/songs/${songId}/import`, {
+    binary: true, body: zip, query: { name: 'voicenotes.zip', type: 'application/zip' },
+  });
+  check('zip import: 2 audio entries', r.status === 200 && r.data.imported === 2, r.data);
+  const poolTake = r.data.takes[0];
+  check('pool item is unplaced (stage 0, pool lane)', poolTake.stage === 0 && poolTake.laneType === 'pool', poolTake);
+  check('pool item not tempo-flagged', !(poolTake.flags && poolTake.flags.tempo), poolTake.flags);
+  r = await owner.call('POST', `/api/songs/${songId}/import`, {
+    binary: true, body: note2, query: { name: 'single-note.wav', type: 'audio/wav' },
+  });
+  check('single-file import', r.status === 200 && r.data.imported === 1, r.data);
+  r = await owner.call('POST', `/api/takes/${poolTake.id}/duplicate`, {
+    body: { stage: 1, laneType: 'section', laneId: sec1.id, offsetBeats: 2, name: poolTake.name },
+  });
+  check('place copy from pool', r.status === 200 && r.data.id, r.data);
+  r = await owner.call('GET', `/api/songs/${songId}`);
+  const placed = r.data.takes.find(t => t.laneId === sec1.id && t.name === poolTake.name);
+  const stillPooled = r.data.takes.find(t => t.id === poolTake.id);
+  check('copy landed in section, original stays pooled', !!placed && stillPooled.laneType === 'pool', { placed: !!placed });
+  const pool2 = r.data.takes.filter(t => t.laneType === 'pool')[1];
+  r = await owner.call('PATCH', `/api/takes/${pool2.id}`, { body: { stage: 1, laneType: 'section', laneId: sec1.id, offsetBeats: 0 } });
+  check('move pool item out of pool', r.status === 200, r.data);
+  r = await owner.call('POST', '/api/songs', { body: { name: 'Second Song', bpm: 100 } });
+  const song2Id = r.data.id;
+  r = await owner.call('POST', `/api/takes/${take1.id}/send-to-song`, { body: { songId: song2Id } });
+  check('send take to other song pool', r.status === 200 && r.data.songName === 'Second Song', r.data);
+  r = await owner.call('GET', `/api/songs/${song2Id}`);
+  check('take arrived in other song pool', r.data.takes.some(t => t.laneType === 'pool' && t.name === take1.name), r.data.takes.length);
+  r = await guest.call('POST', `/api/takes/${take1.id}/send-to-song`, { body: { songId: song2Id } });
+  check('guest without target access blocked', r.status === 403, r.status);
 
   console.log('· role guardrails');
   r = await guest.call('PATCH', `/api/songs/${songId}`, { body: { bpm: 90 } });

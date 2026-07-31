@@ -637,6 +637,28 @@ export function copyToSectionDialog(take) {
     }, 'Copy'))));
 }
 
+export async function sendToSongDialog(take) {
+  let home;
+  try { home = await api.get('/api/home'); }
+  catch (e) { return toast(e.message, 'error'); }
+  const others = home.songs.filter(s => s.id !== store.songId);
+  if (!others.length) return toast('No other songs yet — create one first', 'error');
+  const sel = h('select.input', {},
+    others.map(s => h('option', { value: s.id }, s.name)));
+  const m = modal('Send to another song', h('div.col.gap', {},
+    h('p.dim.small', {}, `"${take.name}" will land in that song's Pool as unplaced audio, ready to drag in. This song keeps its copy.`),
+    h('label.field', {}, 'Destination song', sel),
+    h('div.row.end', {}, h('button.btn.primary', {
+      onclick: async () => {
+        try {
+          const r = await api.post(`/api/takes/${take.id}/send-to-song`, { songId: sel.value });
+          m.close();
+          toast(`Sent "${take.name}" to the Pool of "${r.songName}"`);
+        } catch (e) { toast(e.message, 'error'); }
+      },
+    }, 'Send'))));
+}
+
 export function commentAt(beat) {
   const input = h('textarea.input', { rows: 3, placeholder: 'Pin a comment at this beat…' });
   const m = modal(`Comment at beat ${beat.toFixed(2)}`, h('div.col.gap', {},

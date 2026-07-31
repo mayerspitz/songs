@@ -131,7 +131,8 @@ async function newTakeFromRec(user, song, rec, meta, { isSuggestion, label }) {
   const fid = await saveFile(rec);
   const an = analysis.analyzeAll(rec.pcm);
   const flags = {};
-  const tf = tempoFlag(song, an);
+  // pool items aren't on the grid yet — no tempo flag until they're placed
+  const tf = meta.laneType === 'pool' ? null : tempoFlag(song, an);
   if (tf) flags.tempo = tf;
   const tid = id();
   await q(
@@ -640,18 +641,28 @@ route('POST', '/api/takes/:id/restore', async ({ user, params }) => {
 
 route('POST', '/api/takes/:id/duplicate', async ({ user, params, body }) => {
   const { take, song } = await takeAccess(user, params.id);
-  const { role } = await songAccess(user, song.id, 'editContent');
+  // placing a copy of your own pool item only needs addTake; everything else is contributor territory
+  const placingOwnPoolItem = take.lane_type === 'pool' && take.author_id === user.id;
+  const { role } = await songAccess(user, song.id, placingOwnPoolItem ? 'addTake' : 'editContent');
+  const targetLaneType = body.laneType || take.lane_type;
   const tid = id();
+  // leaving the pool onto the grid -> run the tempo check the pool import skipped
+  let flags = take.flags || {};
+  if (take.lane_type === 'pool' && targetLaneType !== 'pool') {
+    flags = {};
+    const tf = tempoFlag(song, take.analysis);
+    if (tf) flags.tempo = tf;
+  }
   await q(`INSERT INTO takes (id, song_id, stage, lane_type, lane_id, name, author_id, is_suggestion,
              offset_beats, gain, muted, file_id, history, analysis, notes, flags, rec_ctx, variant_of)
-           SELECT $2, song_id, $3, $4, $5, $6, $7, false, $8, gain, muted, file_id, '[]',
-                  analysis, notes, flags, rec_ctx, variant_of
+           SELECT $2, song_id, $3, $4, $5, $6, $7, $9, $8, gain, muted, file_id, '[]',
+                  analysis, notes, $10, rec_ctx, variant_of
            FROM takes WHERE id = $1`,
-    [take.id, tid, body.stage || take.stage, body.laneType || take.lane_type,
+    [take.id, tid, body.stage != null ? body.stage : take.stage, targetLaneType,
       body.laneId || take.lane_id, String(body.name || take.name + ' (copy)').slice(0, 120), user.id,
-      body.offsetBeats != null ? Number(body.offsetBeats) : take.offset_beats]);
+      body.offsetBeats != null ? Number(body.offsetBeats) : take.offset_beats,
+      !perm.allows(role, 'editContent'), JSON.stringify(flags)]);
   await bumpRev(song.id);
-  void role;
   return { id: tid };
 });
 
@@ -866,6 +877,61 @@ route('POST', '/api/takes/:id/apply-notes', async ({ user, params, body }) => {
   await q('UPDATE takes SET notes = $2 WHERE id = $1', [take.id, JSON.stringify(notes)]);
   await bumpRev(song.id);
   return { ok: true };
+});
+
+// ----- Pool import (voice notes: single audio files or a whole ZIP) -----
+
+route('POST', '/api/songs/:id/import', { binary: true }, async ({ user, params, url, body }) => {
+  const { song, role } = await songAccess(user, params.id, 'addTake');
+  if (!body || body.length < 16) err(400, 'No file uploaded');
+  const isSuggestion = !perm.allows(role, 'editContent');
+  const claimedName = String(url.searchParams.get('name') || 'Voice note').slice(0, 110);
+  const isZip = body[0] === 0x50 && body[1] === 0x4b && (claimedName.toLowerCase().endsWith('.zip')
+    || (url.searchParams.get('type') || '').includes('zip') || (body[2] === 3 && body[3] === 4));
+  const results = [];
+  const failures = [];
+  const importOne = async (name, ext, data) => {
+    try {
+      const rec = await audio.ingest(data, ext);
+      if (rec.duration < 0.2) throw new Error('too short');
+      const take = await newTakeFromRec(user, song, rec,
+        { stage: 0, laneType: 'pool', laneId: 'pool', offsetBeats: 0 },
+        { isSuggestion, label: name.replace(/[_-]+/g, ' ').trim().slice(0, 110) || 'Voice note' });
+      results.push(take);
+    } catch (e) {
+      failures.push({ name, error: String(e.message || e).slice(0, 120) });
+    }
+  };
+  if (isZip) {
+    let entries;
+    try { entries = require('./zip').audioEntries(body); }
+    catch (e) { err(400, 'Could not read the ZIP: ' + e.message); }
+    if (!entries.length) err(400, 'No audio files found inside the ZIP');
+    for (const e of entries) await importOne(e.name, e.ext, e.data);
+  } else {
+    const dot = claimedName.lastIndexOf('.');
+    const ext = dot >= 0 ? claimedName.slice(dot).toLowerCase() : '.ogg';
+    await importOne(dot >= 0 ? claimedName.slice(0, dot) : claimedName, ext, body);
+  }
+  if (!results.length) err(422, 'Nothing could be imported' + (failures.length ? ` (${failures[0].name}: ${failures[0].error})` : ''));
+  return { imported: results.length, failed: failures, takes: results };
+});
+
+// Send a take (or pool item) to another song's Pool.
+route('POST', '/api/takes/:id/send-to-song', async ({ user, params, body }) => {
+  const { take } = await takeAccess(user, params.id); // view access on the source song
+  const targetId = String(body.songId || '');
+  if (targetId === take.song_id) err(400, 'That take is already in this song');
+  const { song: target, role: targetRole } = await songAccess(user, targetId, 'addTake');
+  const tid = id();
+  await q(`INSERT INTO takes (id, song_id, stage, lane_type, lane_id, name, author_id, is_suggestion,
+             offset_beats, gain, file_id, analysis, notes, flags, rec_ctx)
+           VALUES ($1,$2,0,'pool','pool',$3,$4,$5,0,$6,$7,$8,$9,'{}','{}')`,
+    [tid, target.id, take.name, user.id, !perm.allows(targetRole, 'editContent'),
+      take.gain, take.file_id, JSON.stringify(take.analysis || {}),
+      take.notes ? JSON.stringify(take.notes) : null]);
+  await bumpRev(target.id);
+  return { id: tid, songName: target.name };
 });
 
 // ----- flatten -----
