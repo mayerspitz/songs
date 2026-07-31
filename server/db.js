@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS comments (
   resolved BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE takes ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS idx_takes_song ON takes(song_id);
 CREATE INDEX IF NOT EXISTS idx_sections_song ON sections(song_id);
 CREATE INDEX IF NOT EXISTS idx_members_res ON members(resource_type, resource_id);

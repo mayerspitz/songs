@@ -167,7 +167,7 @@ async function renderComp(song, comp) {
   const items = [];
   const place = async (takeId, atBeats) => {
     const t = takesById[takeId];
-    if (!t || !t.file_id || t.muted) return;
+    if (!t || !t.file_id || t.muted || t.deleted) return;
     items.push({ master: await fileMaster(t.file_id), offsetSec: Math.max(0, atBeats * spb), gain: t.gain });
   };
   const p = comp.payload || {};
@@ -330,7 +330,7 @@ route('GET', '/api/songs/:id', async ({ user, params }) => {
     rows('SELECT * FROM tracks WHERE song_id = $1 ORDER BY pos, created_at', [song.id]),
     rows(`SELECT t.*, f.duration AS file_duration, f.peaks AS file_peaks
           FROM takes t LEFT JOIN files f ON f.id = t.file_id
-          WHERE t.song_id = $1 ORDER BY t.created_at`, [song.id]),
+          WHERE t.song_id = $1 AND NOT t.deleted ORDER BY t.created_at`, [song.id]),
     rows('SELECT * FROM comps WHERE song_id = $1 ORDER BY created_at', [song.id]),
     rows('SELECT v.* FROM votes v JOIN comps c ON c.id = v.comp_id WHERE c.song_id = $1', [song.id]),
     rows('SELECT * FROM comments WHERE song_id = $1 ORDER BY created_at', [song.id]),
@@ -622,7 +622,18 @@ route('DELETE', '/api/takes/:id', async ({ user, params }) => {
   const { take, song, role } = await takeAccess(user, params.id);
   const own = take.author_id === user.id;
   if (!(own ? perm.allows(role, 'editOwn') : perm.allows(role, 'deleteAny'))) err(403, 'Cannot delete this take');
-  await q('DELETE FROM takes WHERE id = $1', [take.id]);
+  await q('UPDATE takes SET deleted = true WHERE id = $1', [take.id]); // soft delete -> undoable
+  await bumpRev(song.id);
+  return { ok: true };
+});
+
+route('POST', '/api/takes/:id/restore', async ({ user, params }) => {
+  const take = await one('SELECT * FROM takes WHERE id = $1', [params.id]);
+  if (!take) err(404, 'Take not found');
+  const { song, role } = await songAccess(user, take.song_id, 'view');
+  const own = take.author_id === user.id;
+  if (!(own ? perm.allows(role, 'editOwn') : perm.allows(role, 'deleteAny'))) err(403, 'Cannot restore this take');
+  await q('UPDATE takes SET deleted = false WHERE id = $1', [take.id]);
   await bumpRev(song.id);
   return { ok: true };
 });
@@ -862,24 +873,28 @@ route('POST', '/api/takes/:id/apply-notes', async ({ user, params, body }) => {
 route('POST', '/api/songs/:id/flatten', async ({ user, params, body }) => {
   const { song } = await songAccess(user, params.id, 'process');
   const spb = spbOf(song);
+  const sections = await rows('SELECT * FROM sections WHERE song_id = $1', [song.id]);
+  const secById = Object.fromEntries(sections.map(s => [s.id, s]));
+  // work in ABSOLUTE beats so takes from different sections combine correctly
+  const absOf = t => (t.lane_type === 'section' ? (secById[t.lane_id]?.start_beat || 0) : 0) + t.offset_beats;
   const takes = [];
   for (const tid of body.takeIds || []) {
-    const t = await one('SELECT * FROM takes WHERE id = $1 AND song_id = $2', [tid, song.id]);
+    const t = await one('SELECT * FROM takes WHERE id = $1 AND song_id = $2 AND NOT deleted', [tid, song.id]);
     if (t && t.file_id) takes.push(t);
   }
   if (takes.length < 1) err(400, 'Select takes to flatten');
-  const base = Math.min(...takes.map(t => t.offset_beats));
+  const baseAbs = Math.min(...takes.map(absOf));
   const items = [];
   for (const t of takes) {
-    items.push({ master: await fileMaster(t.file_id), offsetSec: (t.offset_beats - base) * spb, gain: t.gain });
+    items.push({ master: await fileMaster(t.file_id), offsetSec: (absOf(t) - baseAbs) * spb, gain: t.gain });
   }
   const rec = await audio.mixdown(items);
-  const first = takes[0];
+  const first = takes.slice().sort((a, b) => absOf(a) - absOf(b))[0];
+  const laneType = body.laneType || first.lane_type;
+  const laneId = body.laneId || first.lane_id;
+  const laneOrigin = laneType === 'section' ? (secById[laneId]?.start_beat || 0) : 0;
   const t = await newTakeFromRec(user, song, rec,
-    {
-      stage: body.stage || first.stage, laneType: body.laneType || first.lane_type,
-      laneId: body.laneId || first.lane_id, offsetBeats: base,
-    },
+    { stage: body.stage || first.stage, laneType, laneId, offsetBeats: baseAbs - laneOrigin },
     { isSuggestion: false, label: String(body.name || 'Flattened').slice(0, 120) });
   return { take: t };
 });

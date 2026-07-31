@@ -2,18 +2,23 @@
 import { api } from '../api.js';
 import { store } from '../store.js';
 import { engine } from '../audio.js';
-import { h, clear, toast, busy, confirmDlg, avatar, menu, fmtScore, fmtBeat } from '../ui.js';
+import { h, clear, toast, busy, confirmDlg, avatar, menu, fmtScore, fmtBeat, icon } from '../ui.js';
 
 export function panelTabs() {
-  const tabs = [['comps', compLabel()], ['comments', '💬'], ['members', '👥']];
-  return tabs.map(([id, label]) =>
+  const tabs = [
+    ['comps', 'layers', compLabel(), 'Compiled versions & voting'],
+    ['comments', 'comment', 'Comments', 'Comments & pins'],
+    ['members', 'users', 'Members', 'Members & roles'],
+  ];
+  return tabs.map(([id, ic, label, title]) =>
     h(`button.panel-tab${store.ui.panel === id ? '.active' : ''}`, {
+      title, dataset: { tab: id },
       onclick: () => { store.ui.panel = id; store.emit(); },
-    }, label));
+    }, icon(ic, { size: 14 }), h('span.tab-label', {}, label)));
 }
 
 function compLabel() {
-  return { 1: '◉ Comps', 2: '◉ Song comps', 3: '◉ Mixes' }[store.ui.stageView] || '◉ Comps';
+  return { 1: 'Comps', 2: 'Song comps', 3: 'Mixes' }[store.ui.stageView] || 'Comps';
 }
 
 export function renderPanel(el, ctx) {
@@ -67,22 +72,24 @@ function renderComps(el, ctx) {
           avatar(author, 20),
           h('div.min0', {},
             h('div.comp-name.ellip', {}, c.name),
-            h('div.small.dim', {}, votes.length ? `${fmtScore(avg)} ★ · ${votes.length} vote${votes.length > 1 ? 's' : ''}` : 'no votes yet'))),
+            h('div.small.dim', {}, votes.length ? `${fmtScore(avg)}/10 · ${votes.length} vote${votes.length > 1 ? 's' : ''}` : 'no votes yet'))),
         h('div.row.gap-xs', {},
           h(`button.icon-btn${isListening ? '.accent' : ''}`, {
             title: 'Listen to this comp (schedules its takes live)',
             onclick: () => {
               store.ui.listen = isListening ? { type: 'mine', id: null } : { type: 'comp', id: c.id };
               if (stage === 2) store.ui.s2CompId = isListening ? null : c.id;
+              store.ui.selectedTakeId = null;
               store.emit();
             },
-          }, '🎧'),
+          }, icon('headphones')),
           h('button.icon-btn', {
-            title: 'Play server-rendered mix', onclick: () => {
+            title: 'Play the server-rendered mix', onclick: () => {
               engine.auditionUrl(`/api/comps/${c.id}/render`);
             },
-          }, '▶'),
+          }, icon('play')),
           h('button.icon-btn', {
+            title: 'Comp menu',
             onclick: e => menu(e.currentTarget, [
               { label: 'Download WAV', action: () => window.open(`/api/comps/${c.id}/render?format=wav`, '_blank') },
               stage === 1 ? { label: 'Load into my picks', action: () => loadIntoPicks(c) } : null,
@@ -110,7 +117,7 @@ function renderComps(el, ctx) {
                 },
               } : null,
             ]),
-          }, '⋯'))),
+          }, icon('more')))),
       store.can('vote') ? h('div.vote-row', {},
         h('input.vote-slider', {
           type: 'range', min: 1, max: 10, step: 1, value: mine ? mine.score : 5,
@@ -124,7 +131,7 @@ function renderComps(el, ctx) {
         mine ? h('button.icon-btn.small', {
           title: 'Remove my vote',
           onclick: async () => { await api.del(`/api/comps/${c.id}/vote`); store.refreshSong(true); },
-        }, '✕') : null,
+        }, icon('close', { size: 12 })) : null,
         h('div.vote-chips', {}, votes.map(v => {
           const u = store.usersById()[v.user_id];
           return h('span.vote-chip', { title: `${u?.name}: ${v.score}`, style: { background: u?.color || '#888' } }, v.score);
@@ -138,7 +145,7 @@ function renderComps(el, ctx) {
           : stage === 2 ? 'A Song comp = structure + chosen performance runs over the winning Hum comp. Vote 1–10; the winner feeds the Arrange stage.'
             : 'A Mix picks takes per instrument track. Vote 1–10 to converge on the final arrangement.'),
       store.can('createComp')
-        ? h('button.btn.primary.wide', { onclick: saveFromListen }, `＋ Save current listen as ${noun}`)
+        ? h('button.btn.primary.wide', { title: 'Snapshot exactly what you are hearing now into a voteable version', onclick: saveFromListen }, `+ Save current listen as ${noun}`)
         : h('p.small.dim', {}, 'Contributors can create comps. You can listen and vote.'),
       comps.length
         ? comps.map(compCard)
@@ -183,7 +190,7 @@ function renderComments(el) {
   const stage = store.ui.stageView;
   const comments = (store.song.comments || []).filter(c => c.stage === stage);
   const focus = store.ui.focusComment;
-  const input = h('textarea.input.comment-input', { placeholder: store.ui.pinMode ? 'Comment to pin at the next timeline click…' : 'Write a comment… (toggle 📍 to pin at a beat)', rows: 2 });
+  const input = h('textarea.input.comment-input', { placeholder: store.ui.pinMode ? 'Comment to pin at the next timeline click…' : 'Write a comment… (use the pin toggle to pin at a beat)', rows: 2 });
 
   const send = async (beat = null) => {
     const text = input.value.trim();
@@ -208,22 +215,24 @@ function renderComments(el) {
           h('div.row.gap-s.small', {},
             h('b', {}, author?.name || '—'),
             c.beat != null ? h('span.pin-chip', {
-              title: 'Jump to beat',
+              title: 'Jump to this beat',
               onclick: () => { store.ui.playhead = c.beat; store.emit(); },
-            }, `📍 ${fmtBeat(c.beat, store.bpb())}`) : null,
+            }, icon('pin', { size: 11 }), ` ${fmtBeat(c.beat, store.bpb())}`) : null,
             take ? h('span.pin-chip', {
+              title: 'Select the referenced take',
               onclick: () => { store.ui.selectedTakeId = take.id; store.emit(); },
-            }, `🎤 ${take.name}`) : null,
+            }, icon('mic', { size: 11 }), ` ${take.name}`) : null,
             h('span.dim', {}, new Date(c.created_at).toLocaleDateString())),
           h('div.comment-text', {}, c.text))),
       h('div.row.gap-xs.comment-actions', {},
         (c.author_id === store.user.id || store.can('editContent')) ? h('button.icon-btn.small', {
           title: c.resolved ? 'Reopen' : 'Resolve',
           onclick: async () => { await api.patch(`/api/comments/${c.id}`, { resolved: !c.resolved }); store.refreshSong(true); },
-        }, c.resolved ? '↺' : '✓') : null,
+        }, c.resolved ? icon('undo', { size: 13 }) : icon('check', { size: 13 })) : null,
         (c.author_id === store.user.id || store.can('deleteAny')) ? h('button.icon-btn.small', {
+          title: 'Delete comment',
           onclick: async () => { await api.del(`/api/comments/${c.id}`); store.refreshSong(true); },
-        }, '🗑') : null));
+        }, icon('trash', { size: 13 })) : null));
   };
 
   clear(el,
@@ -232,7 +241,7 @@ function renderComments(el) {
         ? h('div.col.gap-s', {}, input,
           h('div.row.gap-s.end', {},
             store.ui.selectedTakeId ? h('span.small.dim', {}, 'attaches to selected take') : null,
-            h('button.btn.small', { onclick: () => send(store.ui.playhead || 0), title: 'Pin at playhead' }, '📍 at playhead'),
+            h('button.btn.small', { onclick: () => send(store.ui.playhead || 0), title: 'Pin this comment at the playhead beat' }, icon('pin', { size: 12 }), ' at playhead'),
             h('button.btn.small.primary', { onclick: () => send(null) }, 'Send')))
         : h('p.small.dim', {}, 'Suggesters and up can comment.'),
       comments.length ? comments.slice().reverse().map(item) : h('div.dim.small.pad-s', {}, 'No comments on this stage yet.')));
@@ -286,7 +295,7 @@ function renderMembers(el) {
             await api.del(`/api/member/${m.id}`); store.refreshSong(true);
           }
         },
-      }, '✕') : null);
+      }, icon('close', { size: 12 })) : null);
   };
 
   const owner = store.usersById()[store.song.song.owner_id];

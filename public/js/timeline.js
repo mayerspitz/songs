@@ -29,6 +29,7 @@ export class Timeline {
     canvas.addEventListener('pointercancel', e => this.onUp(e));
     canvas.addEventListener('wheel', e => this.onWheel(e), { passive: false });
     canvas.addEventListener('dblclick', e => this.onDbl(e));
+    canvas.addEventListener('contextmenu', e => this.onCtx(e));
     this._raf = null;
   }
 
@@ -178,14 +179,25 @@ export class Timeline {
       cx.fillText(label, x + 6, RULER_H + 16);
       cx.restore();
     }
-    // add-section hint
+    // ghost "Create Part" button after the last section
+    this._ghostRect = null;
     if (m.canEdit) {
       const lastEnd = (m.sections || []).reduce((a, s) => Math.max(a, s.start + s.len), 0);
-      const x = this.xOf(lastEnd);
-      if (x > -20 && x < W + 20) {
+      const gx = this.xOf(lastEnd) + 6;
+      const label = `+ Create ${m.nextPartLabel || 'Part'}`;
+      cx.font = '600 10px system-ui, sans-serif';
+      const gw = cx.measureText(label).width + 18;
+      if (gx < W && gx + gw > 0) {
+        this._ghostRect = { x: gx, y: RULER_H + 3, w: gw, h: SECTIONS_H - 7, beat: lastEnd };
+        cx.globalAlpha = 0.45;
+        roundRect(cx, gx, RULER_H + 3, gw, SECTIONS_H - 7, 5);
+        cx.setLineDash([4, 3]);
+        cx.strokeStyle = C.dim;
+        cx.stroke();
+        cx.setLineDash([]);
         cx.fillStyle = C.dim;
-        cx.font = '12px system-ui, sans-serif';
-        cx.fillText('＋', x + 6, RULER_H + 17);
+        cx.fillText(label, gx + 9, RULER_H + 16);
+        cx.globalAlpha = 1;
       }
     }
 
@@ -248,19 +260,19 @@ export class Timeline {
       cx.stroke();
       cx.globalAlpha = 1;
     }
-    // name + badges
+    // badges (vector) + name
+    cx.globalAlpha = c.muted ? 0.5 : 1;
+    let bx = x + 5;
+    const by = y + 7.5;
+    if (c.badges) {
+      if (c.badges.pick) { drawBadge(cx, 'star', bx, by, '#ffd166'); bx += 11; }
+      if (c.badges.flag) { drawBadge(cx, 'warn', bx, by, '#e8a03d'); bx += 11; }
+      if (c.badges.notes) { drawBadge(cx, 'note', bx, by, C.clipText); bx += 10; }
+      if (c.badges.sugg) { drawBadge(cx, 'spark', bx, by, '#e86cb8'); bx += 11; }
+    }
     cx.font = '600 10px system-ui, sans-serif';
     cx.fillStyle = C.clipText;
-    let label = '';
-    if (c.badges) {
-      if (c.badges.pick) label += '★ ';
-      if (c.badges.flag) label += '⚠ ';
-      if (c.badges.notes) label += '♪ ';
-      if (c.badges.sugg) label += '✦ ';
-    }
-    label += c.name;
-    cx.globalAlpha = c.muted ? 0.5 : 1;
-    cx.fillText(label, x + 5, y + 12, Math.max(10, w - 10));
+    cx.fillText(c.name, bx, y + 12, Math.max(10, w - (bx - x) - 5));
     cx.globalAlpha = 1;
     cx.restore();
     roundRect(cx, x, y, w, h, 6);
@@ -284,6 +296,10 @@ export class Timeline {
       return { zone: 'ruler' };
     }
     if (y < RULER_H + SECTIONS_H) {
+      const g = this._ghostRect;
+      if (g && x >= g.x && x <= g.x + g.w && y >= g.y && y <= g.y + g.h) {
+        return { zone: 'ghost-add', beat: g.beat };
+      }
       for (const s of m.sections || []) {
         const sx = this.xOf(s.start), sw = s.len * this.pxPerBeat;
         if (x >= sx - 3 && x <= sx + sw + 3) {
@@ -332,17 +348,21 @@ export class Timeline {
       this.drag = { kind: 'section-edge', section: hitR.section, edge: hitR.edge, orig: { start: hitR.section.start, len: hitR.section.len } };
     } else if (hitR.zone === 'section') {
       this.drag = { kind: 'maybe-section', section: hitR.section, startBeat: beat, orig: hitR.section.start };
+    } else if (hitR.zone === 'ghost-add') {
+      this.drag = { kind: 'none' };
     } else if (hitR.zone === 'clip') {
       this.drag = {
         kind: 'clip', clipId: hitR.clip.id, clip: hitR.clip, rowIndex: hitR.rowIndex,
         grabOffset: beat - hitR.clip.start, curStart: hitR.clip.start, curRow: hitR.rowIndex, moved: false,
       };
-      this.longPress = setTimeout(() => {
-        if (this.drag && this.drag.kind === 'clip' && !this.drag.moved) {
-          this.drag = null;
-          this.cb.onClipMenu && this.cb.onClipMenu(hitR.clip, e.clientX, e.clientY);
-        }
-      }, 550);
+      if (e.pointerType === 'touch') { // touch has no right-click; keep long-press there
+        this.longPress = setTimeout(() => {
+          if (this.drag && this.drag.kind === 'clip' && !this.drag.moved) {
+            this.drag = null;
+            this.cb.onClipMenu && this.cb.onClipMenu(hitR.clip, e.clientX, e.clientY);
+          }
+        }, 550);
+      }
     } else {
       this.drag = { kind: 'pan', startX: x, startScroll: this.scrollBeat, moved: false };
     }
@@ -434,13 +454,15 @@ export class Timeline {
     if (d.kind === 'pan' && !d.moved && this.downAt) {
       const hitR = this.downAt.hit;
       if (hitR.zone === 'sections-empty' && this.m.canEdit) {
-        const beat = this.beatAt(this.downAt.x);
-        const lastEnd = (this.m.sections || []).reduce((a, s) => Math.max(a, s.start + s.len), 0);
-        if (beat >= lastEnd - 0.5) { this.cb.onAddSection && this.cb.onAddSection(this.snap(beat)); return; }
+        this.cb.onAddSection && this.cb.onAddSection(this.snap(this.beatAt(this.downAt.x)));
+        return;
       }
       if (hitR.zone === 'row' || hitR.zone === 'void') {
         this.cb.onEmptyClick && this.cb.onEmptyClick(this.beatAt(this.downAt.x), hitR.row);
       }
+    }
+    if (this.downAt && this.downAt.hit.zone === 'ghost-add' && d.kind === 'none') {
+      this.cb.onAddSection && this.cb.onAddSection(this.downAt.hit.beat);
     }
     if (this.downAt && this.downAt.hit.zone === 'pin') {
       this.cb.onPinClick && this.cb.onPinClick(this.downAt.hit.pin);
@@ -452,6 +474,16 @@ export class Timeline {
     const hitR = this.hit(e.clientX - rect.left, e.clientY - rect.top);
     if (hitR.zone === 'section') this.cb.onSectionDbl && this.cb.onSectionDbl(hitR.section);
     if (hitR.zone === 'clip') this.cb.onClipDbl && this.cb.onClipDbl(hitR.clip);
+  }
+
+  onCtx(e) {
+    e.preventDefault();
+    const rect = this.cv.getBoundingClientRect();
+    const hitR = this.hit(e.clientX - rect.left, e.clientY - rect.top);
+    clearTimeout(this.longPress);
+    this.drag = null;
+    if (hitR.zone === 'clip') this.cb.onClipMenu && this.cb.onClipMenu(hitR.clip, e.clientX, e.clientY);
+    else if (hitR.zone === 'section' && hitR.section.raw) this.cb.onSectionDbl && this.cb.onSectionDbl(hitR.section);
   }
 
   onWheel(e) {
@@ -472,6 +504,38 @@ export class Timeline {
       }
     }
   }
+}
+
+function drawBadge(cx, kind, x, y, color) {
+  cx.save();
+  cx.fillStyle = color;
+  cx.strokeStyle = color;
+  cx.lineWidth = 1.2;
+  if (kind === 'star') {
+    cx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? 4 : 1.8;
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      const px = x + 4 + Math.cos(a) * r, py = y + Math.sin(a) * r;
+      i === 0 ? cx.moveTo(px, py) : cx.lineTo(px, py);
+    }
+    cx.closePath(); cx.fill();
+  } else if (kind === 'warn') {
+    cx.beginPath();
+    cx.moveTo(x + 4, y - 4); cx.lineTo(x + 8, y + 3.6); cx.lineTo(x, y + 3.6);
+    cx.closePath(); cx.fill();
+  } else if (kind === 'note') {
+    cx.beginPath(); cx.arc(x + 2.6, y + 2.6, 1.9, 0, Math.PI * 2); cx.fill();
+    cx.beginPath(); cx.moveTo(x + 4.4, y + 2.6); cx.lineTo(x + 4.4, y - 3.6); cx.lineTo(x + 7.2, y - 2.8);
+    cx.stroke();
+  } else if (kind === 'spark') {
+    cx.beginPath();
+    cx.moveTo(x + 4, y - 4); cx.lineTo(x + 5.4, y - 1.4); cx.lineTo(x + 8, y);
+    cx.lineTo(x + 5.4, y + 1.4); cx.lineTo(x + 4, y + 4); cx.lineTo(x + 2.6, y + 1.4);
+    cx.lineTo(x, y); cx.lineTo(x + 2.6, y - 1.4);
+    cx.closePath(); cx.fill();
+  }
+  cx.restore();
 }
 
 function roundRect(cx, x, y, w, h, r) {

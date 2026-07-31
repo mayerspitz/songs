@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { store } from '../store.js';
 import { engine, CHORD_QUALITIES } from '../audio.js';
 import { INSTRUMENTS, renderNotes, playNotesLive, FX_DEFS, buildFxChain, applyFxToBuffer, encodeWav } from '../synths.js';
-import { h, clear, toast, busy, modal, confirmDlg, slider, menu, NOTE_NAMES, midiName } from '../ui.js';
+import { h, clear, toast, busy, modal, confirmDlg, slider, menu, icon, NOTE_NAMES, midiName } from '../ui.js';
 
 const SECTION_COLORS = ['#4a9de8', '#43b5a0', '#5fbf6e', '#d8c93a', '#e8a03d', '#e8595c', '#b76ce8', '#7c6cf0', '#e86cb8'];
 
@@ -23,7 +23,7 @@ export function settingsDialog() {
       NOTE_NAMES.map((n, j) => h('option', { value: j, selected: j === c.root }, n))),
     h('select.input.tiny', { onchange: e => c.quality = e.target.value },
       Object.entries(CHORD_QUALITIES).map(([k, q]) => h('option', { value: k, selected: k === c.quality }, q.label))),
-    h('button.icon-btn.small', { onclick: () => { st.chords.splice(i, 1); redrawChords(); } }, '✕'));
+    h('button.icon-btn.small', { title: 'Remove chord', onclick: () => { st.chords.splice(i, 1); redrawChords(); } }, icon('close', { size: 12 })));
   const chordsBox = h('div.col.gap-xs');
   const redrawChords = () => clear(chordsBox, st.chords.map(chordRow),
     h('button.btn.small', {
@@ -66,7 +66,7 @@ export function settingsDialog() {
             h('option', { value: 'minor', selected: st.keyMode === 'minor' }, 'minor')))),
       h('label.field', {}, `Recording latency ${st.latency}ms`,
         h('input', { type: 'range', min: 0, max: 350, step: 5, value: st.latency, oninput: e => { st.latency = Number(e.target.value); e.target.closest('label').firstChild.textContent = `Recording latency ${st.latency}ms`; } }))),
-    h('div.field', {}, 'Backing chords (🎹 pad)', chordsBox),
+    h('div.field', {}, 'Backing chords (pad)', chordsBox),
     h('div.row.gap-s', {},
       h('button.btn.small', { onclick: () => midiInput.click() }, song.midi_file_id ? 'Replace MIDI backing…' : 'Upload MIDI backing…'),
       midiInput),
@@ -155,12 +155,12 @@ export function tempoIntentDialog(take) {
     info,
     ratioSlider,
     h('div.row.gap-s.wrap', {},
-      h('button.btn', { onclick: doPreview }, '▶ Preview fixed'),
-      h('button.btn', { onclick: () => engine.audition(take.fileId) }, '▶ Original')),
+      h('button.btn', { title: 'Hear the stretched version', onclick: doPreview }, icon('play', { size: 13 }), ' Preview fixed'),
+      h('button.btn', { title: 'Hear the original', onclick: () => engine.audition(take.fileId) }, icon('play', { size: 13 }), ' Original')),
     h('div.col.gap-s', {},
-      h('button.btn.primary', { onclick: () => act('fix') }, '✓ Fix it — stretch onto the grid (undoable)'),
-      h('button.btn', { onclick: () => act('variant') }, '⑂ Keep both — save an on-grid variant'),
-      h('button.btn', { onclick: () => act('keep') }, '✋ It’s intentional — keep as is'))));
+      h('button.btn.primary', { onclick: () => act('fix') }, icon('check', { size: 13 }), ' Fix it — stretch onto the grid (undoable)'),
+      h('button.btn', { onclick: () => act('variant') }, icon('variant', { size: 13 }), ' Keep both — save an on-grid variant'),
+      h('button.btn', { onclick: () => act('keep') }, 'It’s intentional — keep as is'))));
 }
 
 // ---------- match ----------
@@ -219,15 +219,15 @@ export function matchDialog(take) {
   const m = modal('Match tempo & pitch', h('div.col.gap', {},
     h('label.field', {}, 'Match against',
       h('select.input', { onchange: e => { refId = e.target.value; analyzed = false; previewId = null; } },
-        h('option', { value: 'grid' }, '⌗ The song grid (official tempo)'),
+        h('option', { value: 'grid' }, 'The song grid (official tempo)'),
         takes.map(t => h('option', { value: t.id, selected: t.id === refId }, `${t.name} (${{ 1: 'Hum', 2: 'Song', 3: 'Arrange' }[t.stage]})`)))),
     sug,
-    h('button.btn', { onclick: analyze }, '🧲 Analyze & suggest'),
+    h('button.btn', { title: 'Compare and suggest transpose + stretch', onclick: analyze }, icon('magnet', { size: 13 }), ' Analyze & suggest'),
     centsS, ratioS,
     h('div.row.gap-s.wrap', {},
-      h('button.btn', { onclick: preview }, '▶ Preview'),
-      h('button.btn', { onclick: () => engine.audition(take.fileId) }, '▶ Original'),
-      refId !== 'grid' ? h('button.btn', { onclick: () => { const rt = store.take(refId); if (rt) engine.audition(rt.fileId); } }, '▶ Reference') : null),
+      h('button.btn', { onclick: preview }, icon('play', { size: 13 }), ' Preview'),
+      h('button.btn', { onclick: () => engine.audition(take.fileId) }, icon('play', { size: 13 }), ' Original'),
+      refId !== 'grid' ? h('button.btn', { onclick: () => { const rt = store.take(refId); if (rt) engine.audition(rt.fileId); } }, icon('play', { size: 13 }), ' Reference') : null),
     h('div.row.end.gap-s', {},
       h('button.btn', { onclick: () => commit(true), disabled: !analyzed && false }, 'Apply as variant'),
       h('button.btn.primary', { onclick: () => commit(false) }, 'Apply'))));
@@ -303,7 +303,7 @@ export async function noteCorrectionDialog(take) {
           const ctx = engine.ensure();
           liveStop = playNotesLive(ctx, engine.master, c.notes, spb, 'epiano');
         },
-      }, '▶'))));
+      }, icon('play', { size: 12 })))));
     drawRoll();
   };
   redraw();
@@ -330,11 +330,11 @@ export async function noteCorrectionDialog(take) {
     roll,
     candList,
     h('div.row.gap-s.wrap', {},
-      h('button.btn', { onclick: () => engine.audition(take.fileId) }, '▶ Original hum')),
+      h('button.btn', { title: 'Hear the raw hum', onclick: () => engine.audition(take.fileId) }, icon('play', { size: 13 }), ' Original hum')),
     h('div.row.end.gap-s.wrap', {},
-      h('button.btn', { onclick: () => apply('notes-only') }, '♪ Save notes only'),
-      h('button.btn', { onclick: () => apply('variant') }, '⑂ Corrected variant(s)'),
-      h('button.btn.primary', { onclick: () => apply('corrected-audio') }, '✓ Apply corrected audio'))),
+      h('button.btn', { title: 'Store the note track on the take without touching audio', onclick: () => apply('notes-only') }, icon('note', { size: 13 }), ' Save notes only'),
+      h('button.btn', { title: 'Render corrected audio as new take(s), original kept', onclick: () => apply('variant') }, icon('variant', { size: 13 }), ' Corrected variant(s)'),
+      h('button.btn.primary', { title: 'Replace this take’s audio (undoable)', onclick: () => apply('corrected-audio') }, icon('check', { size: 13 }), ' Apply corrected audio'))),
     { wide: true, onClose: () => { if (liveStop) liveStop(); } });
 }
 
@@ -353,7 +353,7 @@ export function fxDialog(take) {
       chain.map((fx, i) => h('div.fx-row', {},
         h('div.row.between', {},
           h('b.small', {}, FX_DEFS[fx.type].label),
-          h('button.icon-btn.small', { onclick: () => { chain.splice(i, 1); redraw(); } }, '✕')),
+          h('button.icon-btn.small', { title: 'Remove effect', onclick: () => { chain.splice(i, 1); redraw(); } }, icon('close', { size: 12 }))),
         Object.entries(FX_DEFS[fx.type].params).map(([k, p]) => slider({
           label: p.label, min: p.min, max: p.max, step: p.step, value: fx.params[k],
           fmt: v => String(Math.round(v * 100) / 100),
@@ -418,8 +418,8 @@ export function fxDialog(take) {
       h('span.tiny.dim', {}, `(whole take = 0 → ${durBeats.toFixed(2)})`)),
     chainBox,
     h('div.row.gap-s', {},
-      h('button.btn', { onclick: preview }, '▶ Preview'),
-      h('button.btn', { onclick: stopPreview }, '■')),
+      h('button.btn', { title: 'Hear the effect chain live', onclick: preview }, icon('play', { size: 13 }), ' Preview'),
+      h('button.btn', { title: 'Stop preview', onclick: stopPreview }, icon('stop', { size: 13 }))),
     h('div.row.end', {}, h('button.btn.primary', { onclick: apply }, 'Apply (undoable)'))),
     { onClose: stopPreview });
 }
@@ -477,7 +477,7 @@ export function generateDialog(trackId) {
       h('label.field', {}, 'Octave',
         h('select.input.small', { onchange: e => octave = Number(e.target.value) },
           [-2, -1, 0, 1, 2].map(o => h('option', { value: o, selected: o === octave }, o > 0 ? '+' + o : String(o)))))),
-    h('div.row.gap-s', {}, h('button.btn', { onclick: audition }, '▶ Audition')),
+    h('div.row.gap-s', {}, h('button.btn', { title: 'Hear it with the chosen instrument', onclick: audition }, icon('play', { size: 13 }), ' Audition')),
     h('div.row.end', {}, h('button.btn.primary', { onclick: gen }, 'Generate onto track'))),
     { onClose: () => { if (liveStop) liveStop(); } });
 }
@@ -486,19 +486,43 @@ export function generateDialog(trackId) {
 
 export function sectionDialog(sec, atBeat = null) {
   const isNew = !sec;
+  const bpb = store.bpb();
   const st = sec
-    ? { name: sec.name, start: sec.start_beat, len: sec.length_beats, color: sec.color }
-    : { name: `Part ${String.fromCharCode(65 + (store.song.sections.length % 26))}`, start: atBeat ?? 0, len: store.bpb() * 4, color: SECTION_COLORS[store.song.sections.length % SECTION_COLORS.length] };
+    ? { name: sec.name, start: sec.start_beat, len: sec.length_beats, color: sec.color, snap: false }
+    : { name: `Part ${String.fromCharCode(65 + (store.song.sections.length % 26))}`, start: atBeat ?? 0, len: bpb * 4, color: SECTION_COLORS[store.song.sections.length % SECTION_COLORS.length], snap: true };
   const colorRow = h('div.row.gap-xs', {}, SECTION_COLORS.map(c =>
     h(`button.color-dot${st.color === c ? '.on' : ''}`, {
-      style: { background: c },
+      title: 'Section color',
       onclick: e => { st.color = c; colorRow.querySelectorAll('.color-dot').forEach(d => d.classList.remove('on')); e.target.classList.add('on'); },
+      style: { background: c },
     })));
-  const m = modal(isNew ? 'New section' : 'Edit section', h('div.col.gap', {},
+  const snappedStart = () => st.snap ? Math.round(st.start / bpb) * bpb : st.start;
+  const startInput = h('input.input.small', {
+    type: 'number', min: 0, step: 0.25, value: st.start,
+    title: 'Where this part begins on the timeline',
+    onchange: e => { st.start = Number(e.target.value); refreshSnapNote(); },
+  });
+  const snapNote = h('div.tiny.dim');
+  const snapBox = h('label.row.gap-xs.small', {},
+    h('input', {
+      type: 'checkbox', checked: st.snap,
+      onchange: e => { st.snap = e.target.checked; refreshSnapNote(); },
+    }),
+    ' Align to the bar grid (avoids starting at an off-beat point)');
+  function refreshSnapNote() {
+    const s = snappedStart();
+    snapNote.textContent = st.snap && Math.abs(s - st.start) > 1e-6
+      ? `Will start at beat ${s} (bar ${Math.floor(s / bpb) + 1}) instead of ${st.start}`
+      : `Starts at beat ${s} (bar ${Math.floor(s / bpb) + 1})`;
+  }
+  refreshSnapNote();
+  const m = modal(isNew ? 'Create part' : 'Edit part', h('div.col.gap', {},
     h('label.field', {}, 'Name', h('input.input', { value: st.name, onchange: e => st.name = e.target.value })),
     h('div.row.gap-s', {},
-      h('label.field', {}, 'Start beat', h('input.input.small', { type: 'number', min: 0, step: 0.25, value: st.start, onchange: e => st.start = Number(e.target.value) })),
-      h('label.field', {}, 'Length (beats — can be 1)', h('input.input.small', { type: 'number', min: 0.25, step: 0.25, value: st.len, onchange: e => st.len = Number(e.target.value) }))),
+      h('label.field', {}, 'Starting at beat', startInput),
+      h('label.field', {}, 'Length (beats — can be 1)', h('input.input.small', { type: 'number', min: 0.25, step: 0.25, value: st.len, title: 'How many beats this part spans', onchange: e => st.len = Number(e.target.value) }))),
+    snapBox,
+    snapNote,
     colorRow,
     h('div.row.between', {},
       !isNew ? h('button.btn.danger', {
@@ -514,10 +538,10 @@ export function sectionDialog(sec, atBeat = null) {
         onclick: async () => {
           try {
             if (isNew) {
-              const created = await api.post(`/api/songs/${store.songId}/sections`, { name: st.name, startBeat: st.start, lengthBeats: st.len, color: st.color });
+              const created = await api.post(`/api/songs/${store.songId}/sections`, { name: st.name, startBeat: snappedStart(), lengthBeats: st.len, color: st.color });
               store.ui.selectedSectionId = created.id;
             } else {
-              await api.patch(`/api/sections/${sec.id}`, { name: st.name, startBeat: st.start, lengthBeats: st.len, color: st.color });
+              await api.patch(`/api/sections/${sec.id}`, { name: st.name, startBeat: snappedStart(), lengthBeats: st.len, color: st.color });
             }
             await store.refreshSong(true);
             m.close();
@@ -577,7 +601,7 @@ export function structureDialog() {
           h('button.icon-btn.small', { onclick: () => { step.repeats = Math.max(1, (step.repeats || 1) - 1); redraw(); } }, '−'),
           h('span.small', {}, `×${step.repeats || 1}`),
           h('button.icon-btn.small', { onclick: () => { step.repeats = (step.repeats || 1) + 1; redraw(); } }, '+'),
-          h('button.icon-btn.small', { onclick: () => { struct.splice(i, 1); redraw(); } }, '✕')));
+          h('button.icon-btn.small', { title: 'Remove from structure', onclick: () => { struct.splice(i, 1); redraw(); } }, icon('close', { size: 12 }))));
     }),
     h('div.row.gap-xs', {},
       h('select.input.small.add-sec', {}, store.song.sections.map(s => h('option', { value: s.id }, s.name))),
