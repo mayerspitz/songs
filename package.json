@@ -1,0 +1,25 @@
+{
+  "name": "humlab",
+  "version": "1.0.0",
+  "description": "Humlab — compose songs by humming: sections, takes, comps, votes and staged arrangement with collaborators.",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "DEV_LOGIN=1 node server/index.js",
+    "smoke": "node test/smoke.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mayerspitz/songs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.4",
+    "ffmpeg-static": "^5.3.0",
+    "pg": "^8.22.0"
+  }
+}
