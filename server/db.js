@@ -8,7 +8,7 @@ let _db = null; // { query(text, params) -> Promise<{rows}> , kind }
 
 async function connect() {
   if (_db) return _db;
-  const url = process.env.DATABASE_URL;
+  const url = process.env.DATABASE_URL || process.env.NEON_POSTGRES_CONNECTION_STRING;
   if (url) {
     const { Pool } = require('pg');
     const needSsl = !/localhost|127\.0\.0\.1/.test(url);
@@ -25,7 +25,7 @@ async function connect() {
     const lite = new PGlite('file://' + dir);
     await lite.waitReady;
     _db = { kind: 'pglite', query: (text, params) => lite.query(text, params) };
-    console.log('[db] DATABASE_URL not set — using embedded PGlite at .data/pglite (local dev mode)');
+    console.log('[db] no DATABASE_URL / NEON_POSTGRES_CONNECTION_STRING — using embedded PGlite at .data/pglite (local dev mode)');
   }
   await migrate(_db);
   return _db;

@@ -2,7 +2,7 @@
 // All audio processing runs through ffmpeg (static build with librubberband) for
 // pristine quality. Every stored file keeps two encodings:
 //   master — lossless FLAC, the processing source (never re-encoded from lossy)
-//   play   — AAC .m4a, decodable by every browser's decodeAudioData (incl. Safari)
+//   play   — MP3, decodable by every browser's decodeAudioData (incl. open-source Chromium)
 
 const { execFile } = require('child_process');
 const fs = require('fs/promises');
@@ -68,9 +68,9 @@ async function ingest(inputBuf, ext = '.webm') {
   const { master, play } = await withTempFiles(async mk => {
     const inp = await mk(ext, inputBuf);
     const mst = await mk('.flac');
-    const ply = await mk('.m4a');
+    const ply = await mk('.mp3');
     await run(['-i', inp, '-vn', '-ac', '1', '-ar', String(SR), '-c:a', 'flac', mst]);
-    await run(['-i', inp, '-vn', '-ac', '1', '-ar', String(SR), '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', ply]);
+    await run(['-i', inp, '-vn', '-ac', '1', '-ar', String(SR), '-c:a', 'libmp3lame', '-b:a', '160k', ply]);
     return { master: await fs.readFile(mst), play: await fs.readFile(ply) };
   });
   return { master, play, duration, peaks, pcm };
@@ -78,8 +78,8 @@ async function ingest(inputBuf, ext = '.webm') {
 
 // Re-derive play copy + peaks from a processed master.
 async function finalizeMaster(masterPath, mk) {
-  const ply = await mk('.m4a');
-  await run(['-i', masterPath, '-vn', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', ply]);
+  const ply = await mk('.mp3');
+  await run(['-i', masterPath, '-vn', '-c:a', 'libmp3lame', '-b:a', '160k', ply]);
   const master = await fs.readFile(masterPath);
   const pcm = await decodePcm(master, '.flac');
   return { master, play: await fs.readFile(ply), duration: pcm.length / SR, peaks: peaksFromPcm(pcm), pcm };

@@ -231,7 +231,7 @@ const route = (method, pattern, opts, handler) => {
 
 route('GET', '/api/config', { public: true }, async () => ({
   devLogin: process.env.DEV_LOGIN === '1',
-  google: !!process.env.GOOGLE_CLIENT_ID,
+  google: !!require('./auth').GOOGLE_ID(),
 }));
 
 route('GET', '/api/me', { public: true }, async ({ user }) => user
@@ -970,7 +970,7 @@ route('GET', '/api/comps/:id/render', async ({ user, params, url, res }) => {
     });
     res.end(wav);
   } else {
-    res.writeHead(200, { 'Content-Type': 'audio/mp4', 'Cache-Control': 'no-store' });
+    res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' });
     res.end(asBuf(rec.play));
   }
   return { __handled: true };
@@ -1022,7 +1022,7 @@ route('GET', '/api/files/:id/audio', async ({ user, params, res }) => {
   const f = await one('SELECT play FROM files WHERE id = $1', [params.id]);
   if (!f) err(404, 'File not found');
   void user;
-  res.writeHead(200, { 'Content-Type': 'audio/mp4', 'Cache-Control': 'private, max-age=31536000, immutable' });
+  res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'private, max-age=31536000, immutable' });
   res.end(asBuf(f.play));
   return { __handled: true };
 });
@@ -1045,7 +1045,7 @@ route('GET', '/api/files/:id/wav', async ({ params, res }) => {
 route('GET', '/api/previews/:id/audio', async ({ params, res }) => {
   const pv = previews.get(params.id);
   if (!pv) err(404, 'Preview expired');
-  res.writeHead(200, { 'Content-Type': 'audio/mp4', 'Cache-Control': 'no-store' });
+  res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' });
   res.end(asBuf(pv.rec.play));
   return { __handled: true };
 });

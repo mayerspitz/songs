@@ -113,6 +113,6 @@ const server = http.createServer(async (req, res) => {
   server.listen(PORT, () => {
     console.log(`Humlab listening on http://localhost:${PORT}`);
     if (process.env.DEV_LOGIN === '1') console.log('[auth] DEV_LOGIN enabled — do not use in production');
-    if (!process.env.GOOGLE_CLIENT_ID) console.log('[auth] Google OAuth not configured (set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)');
+    if (!authMod.GOOGLE_ID()) console.log('[auth] Google OAuth not configured (set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)');
   });
 })().catch(e => { console.error('Fatal boot error:', e); process.exit(1); });

@@ -5,6 +5,9 @@
 const crypto = require('crypto');
 const { q, one, id } = require('./db');
 
+const GOOGLE_ID = () => process.env.GOOGLE_AUTH_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
+const GOOGLE_SECRET = () => process.env.GOOGLE_AUTH_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET;
+
 const SESSION_DAYS = 60;
 const COLORS = ['#e8595c', '#e8a03d', '#d8c93a', '#5fbf6e', '#43b5a0', '#4a9de8', '#7c6cf0', '#b76ce8', '#e86cb8', '#8a9aa8'];
 
@@ -70,7 +73,7 @@ async function upsertUser({ email, name, picture }) {
 // ---- Routes ----
 
 async function googleStart(req, res) {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientId = GOOGLE_ID();
   if (!clientId) { res.writeHead(500); return res.end('GOOGLE_CLIENT_ID not configured'); }
   const state = crypto.randomBytes(16).toString('hex');
   setCookie(res, 'oauth_state', state, { maxAge: 600, secure: appUrl(req).startsWith('https') });
@@ -98,8 +101,8 @@ async function googleCallback(req, res, url) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       code,
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      client_id: GOOGLE_ID(),
+      client_secret: GOOGLE_SECRET(),
       redirect_uri: appUrl(req) + '/auth/google/callback',
       grant_type: 'authorization_code',
     }),
@@ -135,4 +138,4 @@ async function logout(req, res) {
   res.end('{"ok":true}');
 }
 
-module.exports = { userFromReq, googleStart, googleCallback, devLogin, logout, appUrl };
+module.exports = { userFromReq, googleStart, googleCallback, devLogin, logout, appUrl, GOOGLE_ID };
