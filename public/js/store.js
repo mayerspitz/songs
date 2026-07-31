@@ -77,6 +77,7 @@ export const store = {
   takesFor(stage, laneType, laneId) {
     return (this.song?.takes || []).filter(t => t.stage === stage && t.laneType === laneType && (laneId == null || t.laneId === laneId));
   },
+  poolTakes() { return (this.song?.takes || []).filter(t => t.laneType === 'pool'); },
   take(id) { return (this.song?.takes || []).find(t => t.id === id); },
   section(id) { return (this.song?.sections || []).find(s => s.id === id); },
   comp(id) { return (this.song?.comps || []).find(c => c.id === id); },
@@ -107,6 +108,7 @@ export const store = {
     if (!s) return 64;
     const secEnd = (s.sections || []).reduce((a, x) => Math.max(a, x.start_beat + x.length_beats), 0);
     const takeEnd = (s.takes || []).reduce((a, t) => {
+      if (t.laneType === 'pool') return a;
       const base = t.laneType === 'section' ? (this.section(t.laneId)?.start_beat || 0) : 0;
       const spb = this.spb() || 0.5;
       return Math.max(a, base + t.offsetBeats + (t.duration || 0) / spb);

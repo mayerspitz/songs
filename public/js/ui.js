@@ -180,6 +180,10 @@ const ICON_PATHS = {
   wave: [['path', 'M2 12c2.2-6.5 4.3-6.5 6.5 0s4.3 6.5 6.5 0 4.3-6.5 6.5 0']],
   grid: [['rect', { x: 3.5, y: 3.5, width: 17, height: 17, rx: 2 }], ['path', 'M9.2 3.5v17'], ['path', 'M14.8 3.5v17'], ['path', 'M3.5 9.2h17'], ['path', 'M3.5 14.8h17']],
   variant: [['path', 'M6 3v7a4 4 0 0 0 4 4h8'], ['path', 'M14 10l4 4-4 4'], ['path', 'M6 3v18']],
+  archive: [['rect', { x: 3, y: 3.5, width: 18, height: 5, rx: 1 }], ['path', 'M5 8.5V19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5'], ['path', 'M10 12.5h4']],
+  upload: [['path', 'M12 20V8'], ['path', 'M7 13l5-5 5 5'], ['path', 'M4.5 3.5h15']],
+  drag: [['circle', { cx: 9, cy: 6, r: 1.4, fill: true }], ['circle', { cx: 15, cy: 6, r: 1.4, fill: true }], ['circle', { cx: 9, cy: 12, r: 1.4, fill: true }], ['circle', { cx: 15, cy: 12, r: 1.4, fill: true }], ['circle', { cx: 9, cy: 18, r: 1.4, fill: true }], ['circle', { cx: 15, cy: 18, r: 1.4, fill: true }]],
+  place: [['path', 'M12 3v10'], ['path', 'M8 9l4 4 4-4'], ['rect', { x: 4, y: 16, width: 16, height: 5, rx: 1.5 }]],
 };
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
