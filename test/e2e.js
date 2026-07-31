@@ -94,7 +94,7 @@ function makeMicWav(path) {
   ok('inspector shows the new take', await page.locator('.inspector .take-name, .inspector b').count() >= 1);
 
   console.log('· solo playback of the take');
-  await page.click('.inspector button:has-text("▶ Solo")');
+  await page.click('.inspector button:has-text("Solo")');
   await page.waitForTimeout(700);
   ok('no console errors so far', errors.length === 0, errors.join(' | '));
 
@@ -112,14 +112,14 @@ function makeMicWav(path) {
   ok('vote registered', (await page.locator('.comp-card .small.dim').first().textContent()).includes('9.0'));
 
   console.log('· comment with pin');
-  await page.click('.panel-tab:has-text("💬")');
+  await page.click('.panel-tab[data-tab="comments"]');
   await page.fill('.comment-input', 'love the hook here');
-  await page.click('button:has-text("📍 at playhead")');
+  await page.click('button:has-text("at playhead")');
   await page.waitForTimeout(600);
   ok('comment appears', (await page.locator('.comment-text').first().textContent()) === 'love the hook here');
 
   console.log('· members panel');
-  await page.click('.panel-tab:has-text("👥")');
+  await page.click('.panel-tab[data-tab="members"]');
   await page.fill('.invite-box input[type=email]', 'friend@test.dev');
   await page.click('.invite-box button:has-text("Invite")');
   await page.waitForTimeout(600);
@@ -135,7 +135,7 @@ function makeMicWav(path) {
   await page.click('button:has-text("+ Track")');
   await page.click('.modal button:has-text("Add track")');
   await page.waitForTimeout(600);
-  ok('track created (toolbar has track btn)', await page.locator('button:has-text("⚙ Track")').count() === 1);
+  ok('track created (toolbar has track btn)', await page.locator('button:has-text("Track…")').count() === 1);
 
   console.log('· note correction dialog on the hum (back on stage 1)');
   await page.click('.stage-tab:has-text("1 · Hum")');
@@ -145,7 +145,7 @@ function makeMicWav(path) {
   const box = await canvas.boundingBox();
   await page.mouse.click(box.x + 30, box.y + 26 + 26 + 20); // first clip area
   await page.waitForTimeout(300);
-  const actionsBtn = page.locator('button:has-text("Actions ▾")');
+  const actionsBtn = page.locator('button:has-text("Actions")');
   if (await actionsBtn.count()) {
     await actionsBtn.click();
     const nc = page.locator('.menu-item:has-text("Note correction")');
@@ -160,6 +160,29 @@ function makeMicWav(path) {
       }
     } else ok('note correction menu item exists', false);
   } else ok('take selectable for actions', false);
+
+  console.log('· double-click selects + right-click menu + keyboard delete/undo');
+  const songId = await page.evaluate(() => location.hash.split('/')[2]);
+  const takeCount = async () => page.evaluate(id => fetch(`/api/songs/${id}`).then(r => r.json()).then(s => s.takes.length), songId);
+  const clipXY = [(await page.locator('canvas.tl-canvas').boundingBox()).x + 30,
+    (await page.locator('canvas.tl-canvas').boundingBox()).y + 26 + 26 + 20];
+  await page.mouse.dblclick(clipXY[0], clipXY[1]);
+  await page.waitForTimeout(500);
+  ok('double-click selects the take (inspector shows it)', await page.locator('.inspector button:has-text("Solo")').count() === 1);
+  await page.mouse.click(clipXY[0], clipXY[1], { button: 'right' });
+  await page.waitForTimeout(300);
+  ok('right-click opens the take menu', await page.locator('.ctx-menu .menu-item:has-text("Note correction")').count() === 1);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  const before = await takeCount();
+  await page.mouse.click(clipXY[0], clipXY[1]);
+  await page.waitForTimeout(300);
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(800);
+  ok('keyboard Delete removes the take', (await takeCount()) === before - 1, `before=${before}`);
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(800);
+  ok('Ctrl+Z restores the deleted take', (await takeCount()) === before);
 
   console.log('· mobile viewport sanity');
   await page.setViewportSize({ width: 390, height: 780 });

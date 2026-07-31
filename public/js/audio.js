@@ -259,16 +259,28 @@ class Engine {
 
   get playing() { return !!this.state; }
 
-  stop() {
+  stop({ silent = false } = {}) {
     const st = this.state;
-    if (!st) return;
+    if (!st) return null;
+    const atBeat = this.currentBeat();
     st.stopped = true;
     clearInterval(st.timer);
     for (const s of st.sources) { try { s.stop(); } catch { /* already stopped */ } }
     for (const o of st.chordNodes || []) { try { o.stop(); } catch { /* ok */ } }
     this.state = null;
-    if (st.plan.onStop) st.plan.onStop();
+    if (!silent && st.plan.onStop) st.plan.onStop(atBeat);
     if (this.onPlayState) this.onPlayState(false);
+    return atBeat;
+  }
+
+  // Live reposition: restart the same plan from a new beat without firing onStop.
+  async seek(beat) {
+    const st = this.state;
+    if (!st || st.plan.noSeek) return false;
+    const plan = st.plan;
+    this.stop({ silent: true });
+    await this.play({ ...plan, fromBeat: Math.max(0, beat), countInBeats: 0 });
+    return true;
   }
 
   // one-shot audition of a file
@@ -281,7 +293,7 @@ class Engine {
     const g = ctx.createGain(); g.gain.value = gain;
     src.connect(g); g.connect(this.master);
     src.start();
-    const st = { plan: { fromBeat: 0, endBeat: buf.duration, loop: false, onStop: onEnd }, spb: 1, span: buf.duration, t0: ctx.currentTime, sources: [src], timer: setInterval(() => { if (ctx.currentTime > st.t0 + buf.duration + 0.05) this.stop(); }, 120) };
+    const st = { plan: { fromBeat: 0, endBeat: buf.duration, loop: false, onStop: onEnd, noSeek: true }, spb: 1, span: buf.duration, t0: ctx.currentTime, sources: [src], timer: setInterval(() => { if (ctx.currentTime > st.t0 + buf.duration + 0.05) this.stop(); }, 120) };
     this.state = st;
     if (this.onPlayState) this.onPlayState(true);
   }

@@ -1,7 +1,7 @@
 'use strict';
 import { api } from '../api.js';
 import { store } from '../store.js';
-import { h, clear, toast, modal, confirmDlg, avatar, menu } from '../ui.js';
+import { h, clear, toast, modal, confirmDlg, avatar, menu, icon } from '../ui.js';
 
 const STAGE_NAMES = { 1: 'Hum', 2: 'Song', 3: 'Arrange' };
 
@@ -51,6 +51,7 @@ export async function renderHome(root) {
         h('div.row.gap-s', {},
           h('button.btn.small', { onclick: () => createSong(col.id) }, '+ Song'),
           h('button.icon-btn', {
+            title: 'Collection menu',
             onclick: e => menu(e.currentTarget, [
               { label: 'Invite members', action: () => inviteDialog('collection', col.id, col.name) },
               { label: 'Rename', action: () => renameCollection(col) },
@@ -61,7 +62,7 @@ export async function renderHome(root) {
                   }
                 } },
             ]),
-          }, '⋯'))),
+          }, icon('more')))),
       h('div.cards', {}, songs.length ? songs.map(songCard) : h('div.dim.small.pad-s', {}, 'No songs yet')));
   };
 
@@ -101,7 +102,7 @@ export async function renderHome(root) {
 
   clear(root,
     h('div.topbar', {},
-      h('div.brand', {}, h('span.brand-mark', {}, '〰'), 'Humlab'),
+      h('div.brand', {}, h('span.brand-mark', {}, icon('wave', { size: 20 })), 'Humlab'),
       h('div.row.gap-s', {},
         avatar(store.user, 28),
         h('button.btn.small', {
@@ -129,7 +130,7 @@ export async function renderHome(root) {
           looseSongs.length ? looseSongs.map(songCard)
             : (data.collections.length ? h('div.dim.small.pad-s', {}, 'No standalone songs')
               : h('div.empty-hero', {},
-                h('div.empty-emoji', {}, '🎤'),
+                h('div.empty-emoji', {}, icon('mic', { size: 42 })),
                 h('p', {}, 'Hum it before you build it.'),
                 h('p.dim.small', {}, 'Create a song, record humming takes into sections, invite friends to pick favorites and vote — then arrange the winner.')))))));
   return root;
@@ -154,7 +155,7 @@ export function renderLogin(root) {
   clear(root,
     h('div.login-hero', {},
       h('div.login-card', {},
-        h('div.brand.big', {}, h('span.brand-mark', {}, '〰'), 'Humlab'),
+        h('div.brand.big', {}, h('span.brand-mark', {}, icon('wave', { size: 34 })), 'Humlab'),
         h('p.tagline', {}, 'Compose songs by humming. Takes, comps, votes — then arrange the winner, together.'),
         store.config.google
           ? h('a.btn.google-btn', { href: '/auth/google' },
